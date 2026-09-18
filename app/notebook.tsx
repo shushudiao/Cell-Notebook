@@ -40,6 +40,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Choice, DataTable, Field, Modal } from './controls';
+import { applyPassage } from '@/lib/passage';
 import {
   AfterForm,
   CountForm,
@@ -258,6 +259,9 @@ export default function NotebookApp({
     .sort((a, b) => b.at.localeCompare(a.at));
   const latest = counts[0],
     latestStats = latest ? stats(latest.readings, latest.basis) : null;
+  const handlingEvents = projectCounts.flatMap(c => c.treatments.map(t => ({ count: c, treatment: t })))
+    .filter(({ count: c, treatment: t }) => (cultureId === 'all' || c.cultureId === cultureId) && (!from || localDate(t.at) >= from) && (!to || localDate(t.at) <= to))
+    .sort((a, b) => b.treatment.at.localeCompare(a.treatment.at));
   const selectedCount = modal?.id
       ? data.counts.find((c) => c.id === modal.id)
       : undefined,
@@ -568,14 +572,14 @@ export default function NotebookApp({
               <TabsContent value="overview">
                 <div className="metrics">
                   <Metric
-                    title="最新 Live 浓度"
+                    title={latest?.origin ? '最新 Live 浓度（估算）' : '最新 Live 浓度'}
                     value={sci(latestStats?.live)}
                     unit="cells/mL"
                   />
                   <Metric
                     title="平均存活率"
                     value={latestStats ? percent(latestStats.viability) : '—'}
-                    unit={latest ? `${latestStats?.n} 次重复测量` : ''}
+                    unit={latest ? latest.origin ? '分瓶起始估算 · 非实测' : `${latestStats?.n} 次重复测量` : ''}
                   />
                   <Metric
                     title="培养液剩余量"
@@ -635,6 +639,14 @@ export default function NotebookApp({
                     </div>
                   )}
                 </article>
+                <article className="panel handling-panel">
+                  <div className="section-heading"><div><h2>细胞处理概览</h2><p className="muted">按处理时间排列 · {handlingEvents.length} 次操作 · 跟随日期与容器筛选</p></div></div>
+                  {handlingEvents.length ? <DataTable headers={['日期 / 时间', '培养容器', '处理', '用量 / 去向', '备注', '']} rows={handlingEvents.map(({ count: c, treatment: t }) => [
+                    dateLabel(t.at), nameOf(c.cultureId), t.kind,
+                    t.passage ? t.passage.targets.map(target => `${target.name}：原液 ${target.stock} mL + 培养液 ${target.medium} mL`).join('；') : `移除 ${t.remove} mL · 添加 ${t.add} mL`,
+                    t.notes || '—', <button className="text-button" onClick={() => setModal({ type: 'detail', id: c.id })}>查看原记录 →</button>,
+                  ])} /> : <p className="muted">暂无处理记录。打开一次计数，点击“添加处理”即可登记。</p>}
+                </article>
                 <div className="section-heading culture-title">
                   <h2>培养容器</h2>
                   <button
@@ -659,6 +671,7 @@ export default function NotebookApp({
                           </span>
                         </div>
                         <h3>{c.name}</h3>
+                        {c.endedAt && <span className="pill">原瓶已分完 · 历史保留</span>}
                         <p className="muted">
                           {container.type}
                           {container.wells.length
@@ -724,7 +737,7 @@ export default function NotebookApp({
                               setModal({ type: 'detail', id: c.id })
                             }
                           >
-                            {dateLabel(c.at)}
+                            {dateLabel(c.at)}{c.origin && <small> · 起始估算</small>}
                           </button>,
                           nameOf(c.cultureId),
                           sci(s.total),
@@ -958,7 +971,10 @@ export default function NotebookApp({
           <CountDetail
             count={selectedCount}
             culture={nameOf(selectedCount.cultureId)}
-            onAction={(type) => setModal({ type, id: selectedCount.id })}
+            onAction={(type) => {
+              if (type === 'count') setCultureId(selectedCount.cultureId);
+              setModal({ type, id: selectedCount.id });
+            }}
           />
         )}
       </Modal>
@@ -966,10 +982,18 @@ export default function NotebookApp({
         open={modal?.type === 'treatment'}
         onClose={() => setModal(null)}
         title="添加处理记录"
+        wide
       >
         {selectedCount && modal?.type === 'treatment' && (
           <TreatmentForm
             count={selectedCount}
+            sourceCulture={data.cultures.find(c => c.id === selectedCount.cultureId)!}
+            existingNames={cultures.map(c => c.name)}
+            onPassage={async draft => {
+              await save(applyPassage(stateRef.current.data, selectedCount.id, draft));
+              setModal(null);
+              setTab('overview');
+            }}
             onSave={(t) =>
               mutate((d) =>
                 d.counts
@@ -1258,6 +1282,7 @@ function Trend({
             : metric === 'viability'
               ? '每次记录按其所选公式计算；详情中可查看。'
               : '各次计数的重复测量均值，单位 cells/mL。'}
+        {counts.some(c => c.origin) && ' 包含分瓶起始估算点（非实测）；点击数据点可查看来源。'}
       </p>
     </>
   );
@@ -1283,8 +1308,9 @@ function CountDetail({
             {c.container.type}
           </p>
         </div>
-        <span className="pill">{c.readings.length} 次测量</span>
+        <span className="pill">{c.origin ? '分瓶起始估算 · 非实测' : `${c.readings.length} 次测量`}</span>
       </div>
+      {c.origin && <p className="warning">来自 {c.origin.sourceCultureName}：原液 {c.origin.stock} mL + 培养液 {c.origin.medium} mL。以下浓度按稀释比例估算，并非新瓶实测结果；重复读数来自原液测量。请后续新增实测计数。</p>}
       <div className="inline-stats">
         <span>
           Total <b>{sci(s.total)}</b>
@@ -1359,8 +1385,8 @@ function CountDetail({
       )}
       <div className="form-footer">
         <div className="actions">
-          <button className="secondary" onClick={() => onAction('editCount')}>
-            修改计数
+          <button className="secondary" onClick={() => onAction(c.origin ? 'count' : 'editCount')}>
+            {c.origin ? '新增实测计数' : '修改计数'}
           </button>
           <button className="danger-button" onClick={() => onAction('deleteCount')}>
             <Trash2 size={16} />
@@ -1910,4 +1936,3 @@ function BackupPanel({
     </div>
   );
 }
-
