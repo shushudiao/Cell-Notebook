@@ -10,6 +10,8 @@
 - 每张 Slide 至少两次读数，科学计数法输入 Total / Live / Dead（cells/mL）。
 - 均值、逐次存活率平均值、样本标准差、Total CV；按日期、容器查看和导出。
 - 孔位选择、每孔体积、计数时容器快照；添加/移除/换液/取样处理和剩余体积。
+- 培养概览按处理时间展示操作、容器、用量和分瓶去向，支持日期与容器筛选。
+- 传代 / 分瓶可设置新瓶类型、数量、名称及每瓶原液与培养液体积；自动创建同项目新瓶和稀释估算起始记录。原瓶计数保留，全部分出后标记为历史容器；新瓶随后追加实测计数。
 - 实验取样保留独立的原始计数快照；实验后重复测量、体积与前后对比。
 - 私有云端保存、版本冲突保护、恢复上一个版本；数据按登录账号隔离。
 - Excel 五工作表、CSV 原始读数、打印/另存 PDF 报告、完整 JSON 备份。
@@ -43,7 +45,7 @@ Firebase 版本使用 `pnpm dev:firebase` 本地预览、`pnpm build:firebase` �
 
 - `node node_modules/typescript/bin/tsc --noEmit`
 - `node node_modules/tsx/dist/cli.mjs tests/verify.ts`（先创建 work 目录）
+- `node node_modules/tsx/dist/cli.mjs tests/passage.ts`：验证分瓶计算、体积约束、历史保留、备份兼容及导出标识。
 - `tests/verify-api.ps1`：启动本地服务和本地数据库后，验证保存、读回、冲突、无权限请求、历史；结束恢复原始本地数据。
 
 Google Drive 需要在生产站点完成一次真实账号授权验证。WebMCP 不受支持的浏览器自动忽略项目读取/导航接口。
-
