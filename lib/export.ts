@@ -19,6 +19,11 @@ export function exportSheets(d: Notebook, counts: Count[], projectId?: string) {
     Culture: culture(c.cultureId)?.name ?? '',
     Passage: c.passage,
     CountID: c.id,
+    RecordType: c.origin ? 'Passage starting estimate (not measured)' : 'Measured count',
+    SourceCountID: c.origin?.sourceCountId ?? '',
+    SourceCulture: c.origin?.sourceCultureName ?? '',
+    StockVolume_mL: c.origin?.stock ?? null,
+    AddedMedium_mL: c.origin?.medium ?? null,
     DateTimeUTC: c.at,
     TimeZone: c.timezone,
     LocalDate: localDate(c.at),
@@ -78,6 +83,8 @@ export function exportSheets(d: Notebook, counts: Count[], projectId?: string) {
         Added_mL: t.add,
         After_mL: v,
         ExperimentID: t.experimentId ?? '',
+        PassageDestinations: t.passage ? JSON.stringify(t.passage.targets) : '',
+        PassageStockReadings: t.passage?.stockReadings ? JSON.stringify(t.passage.stockReadings) : '',
         Notes: t.notes,
       };
     });
@@ -331,4 +338,3 @@ export function exportPDF(d: Notebook, counts: Count[], name: string) {
   win.focus();
   setTimeout(() => win.print(), 300);
 }
-
