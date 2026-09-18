@@ -1386,6 +1386,10 @@ h3 {
     radial-gradient(circle at 15% 15%, rgba(13, 128, 141, 0.13), transparent 32%),
     linear-gradient(145deg, #f7faf8, #eef4f6);
 }
+.handling-panel { margin-top: 24px; }
+.passage-targets { display: grid; gap: 12px; margin: 18px 0; }
+.passage-targets .info-box { margin: 0; }
+.passage-targets h3 { margin-bottom: 12px; }
 .login-card {
   width: min(100%, 470px);
   padding: 48px;
@@ -1457,4 +1461,3 @@ h3 {
     border-radius: 22px;
   }
 }
-
