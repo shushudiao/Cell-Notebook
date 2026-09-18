@@ -25,6 +25,7 @@ export type Culture = {
   name: string;
   passage: string;
   container: Container;
+  endedAt?: string;
 };
 export type Treatment = {
   id: string;
@@ -34,6 +35,11 @@ export type Treatment = {
   add: number;
   notes: string;
   experimentId?: string;
+  passage?: {
+    targets: { cultureId: string; countId: string; name: string; stock: number; medium: number }[];
+    stockReadings?: Reading[];
+    basis?: Count['basis'];
+  };
 };
 export type Count = {
   id: string;
@@ -47,6 +53,14 @@ export type Count = {
   basis: 'liveDead' | 'total';
   notes: string;
   treatments: Treatment[];
+  origin?: {
+    kind: 'passage';
+    sourceCountId: string;
+    sourceCultureName: string;
+    treatmentId: string;
+    stock: number;
+    medium: number;
+  };
 };
 export type Experiment = {
   id: string;
@@ -370,6 +384,7 @@ export function validateNotebook(input: unknown): Notebook {
     str(c.name, '容器编号', true);
     str(c.passage, '代次');
     validateContainer(c.container);
+    if (c.endedAt) date(c.endedAt);
   });
   const cultures = new Map(d.cultures.map((c) => [c.id, c]));
   const validateCount = (c: Count) => {
@@ -384,6 +399,16 @@ export function validateNotebook(input: unknown): Notebook {
     str(c.notes, '备注');
     validateContainer(c.container);
     validateReadings(c.readings, c.basis);
+    if (c.origin) {
+      requireThat(c.origin.kind === 'passage', '起始记录来源无效');
+      str(c.origin.sourceCountId, '来源计数 ID', true);
+      str(c.origin.sourceCultureName, '来源培养瓶', true);
+      str(c.origin.treatmentId, '来源操作 ID', true);
+      num(c.origin.stock, '原液体积', 1e6);
+      num(c.origin.medium, '培养液体积', 1e6);
+      requireThat(c.origin.stock > 0, '原液体积应大于 0');
+      requireThat(Math.abs(c.origin.stock + c.origin.medium - volumeOf(c.container)) < 1e-7, '分瓶总体积不一致');
+    }
     requireThat(Array.isArray(c.treatments), '处理记录无效');
     let v = volumeOf(c.container);
     const treatmentIds = new Set<string>();
@@ -397,6 +422,19 @@ export function validateNotebook(input: unknown): Notebook {
       str(t.notes, '处理备注');
       num(t.remove, '移除体积', 1e6);
       num(t.add, '添加体积', 1e6);
+      if (t.passage) {
+        if (t.passage.stockReadings) validateReadings(t.passage.stockReadings, t.passage.basis ?? c.basis);
+        requireThat(t.kind === '传代 / 分瓶' && Array.isArray(t.passage.targets) && t.passage.targets.length > 0 && t.passage.targets.length <= 50, '分瓶去向无效');
+        for (const target of t.passage.targets) {
+          str(target.cultureId, '新瓶 ID', true);
+          str(target.countId, '起始记录 ID', true);
+          str(target.name, '新瓶名称', true);
+          num(target.stock, '新瓶原液体积', 1e6);
+          num(target.medium, '新瓶培养液体积', 1e6);
+          requireThat(target.stock > 0, '新瓶原液体积应大于 0');
+        }
+        requireThat(Math.abs(t.passage.targets.reduce((sum, x) => sum + x.stock, 0) - t.remove) < 1e-7 && t.add === 0, '分瓶原液用量不一致');
+      }
       requireThat(
         t.remove <= v + 1e-8,
         '移除或实验用量不能超过该次记录的剩余体积',
@@ -447,4 +485,3 @@ export function validateNotebook(input: unknown): Notebook {
   });
   return d;
 }
-
