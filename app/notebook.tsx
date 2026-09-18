@@ -1653,6 +1653,7 @@ function BackupPanel({
     [error, setError] = useState(''),
     [files, setFiles] = useState<DriveFile[]>([]);
   useEffect(() => {
+    if (!googleDriveEnabled) return;
     void fetch('/api/google/status', { cache: 'no-store' })
       .then(async (response) => {
         const result = (await response.json()) as {
@@ -1674,7 +1675,7 @@ function BackupPanel({
         }
       })
       .catch((e) => setError(e.message));
-  }, []);
+  }, [googleDriveEnabled]);
   const listDrive = async () => {
     const response = await fetch('/api/google/drive', { cache: 'no-store' });
     const result = (await response.json()) as {
