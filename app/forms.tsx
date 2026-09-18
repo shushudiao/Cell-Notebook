@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { type PassageDraft } from '@/lib/passage';
 import {
   Choice,
   ContainerEditor,
@@ -275,9 +276,15 @@ export function CountForm({
 export function TreatmentForm({
   count,
   onSave,
+  sourceCulture,
+  existingNames,
+  onPassage,
 }: {
   count: Count;
   onSave: (t: Treatment) => Promise<void>;
+  sourceCulture: Culture;
+  existingNames: string[];
+  onPassage: (draft: PassageDraft) => Promise<void>;
 }) {
   const [t, setT] = useState<Treatment>({
       id: uid(),
@@ -289,6 +296,10 @@ export function TreatmentForm({
     }),
     [ratio, setRatio] = useState(50);
   const before = remaining(count);
+  if (t.kind === '传代 / 分瓶') return (
+    <PassageForm count={count} sourceCulture={sourceCulture} existingNames={existingNames}
+      onSave={onPassage} onBack={() => setT({ ...t, kind: '添加培养液' })} />
+  );
   return (
     <Form
       onSave={async () => {
@@ -368,6 +379,69 @@ export function TreatmentForm({
       <p className="muted">
         处理后的浓度需要重新测量。这里仅更新体积，不推算处理后的实际细胞浓度。
       </p>
+    </Form>
+  );
+}
+function PassageForm({ count, sourceCulture, existingNames, onSave, onBack }: {
+  count: Count;
+  sourceCulture: Culture;
+  existingNames: string[];
+  onSave: (draft: PassageDraft) => Promise<void>;
+  onBack: () => void;
+}) {
+  const match = /^P?(\d+)$/i.exec(count.passage.trim());
+  const nextPassage = match ? `P${Number(match[1]) + 1}` : count.passage;
+  const newName = (index: number) => {
+    const base = `${sourceCulture.name}-${nextPassage || '分瓶'}-${index + 1}`;
+    let name = base, suffix = 2;
+    while (existingNames.includes(name)) name = `${base}-${suffix++}`;
+    return name;
+  };
+  const [draft, setDraft] = useState<PassageDraft>(() => ({
+    at: new Date(Math.max(Date.now(), Date.parse(count.at), ...count.treatments.map(t => Date.parse(t.at)))).toISOString(),
+    passage: nextPassage, type: 'T75 Flask', notes: '',
+    stockReadings: structuredClone(count.readings), stockBasis: count.basis,
+    targets: [0, 1].map(i => ({ name: newName(i), stock: remaining(count) / 2, medium: 3 })),
+  }));
+  const [confirmed, setConfirmed] = useState(false);
+  const total = draft.targets.reduce((sum, target) => sum + target.stock, 0);
+  const stockStats = stats(draft.stockReadings, draft.stockBasis);
+  const updateTarget = (index: number, patch: Partial<PassageDraft['targets'][number]>) =>
+    setDraft({ ...draft, targets: draft.targets.map((target, i) => i === index ? { ...target, ...patch } : target) });
+  return (
+    <Form label="保存传代并创建新瓶" onSave={async () => {
+      if (!confirmed) throw new Error('请先确认本次原液浓度与可用体积');
+      await onSave(draft);
+    }}>
+      <div className="section-heading"><h3>传代 / 分瓶</h3><button type="button" className="text-button" onClick={onBack}>返回其他处理</button></div>
+      <p className="muted">原瓶：{sourceCulture.name} · {count.container.type} · 可用原液 {remaining(count)} mL。新瓶和起始记录会保存在同一个项目中。</p>
+      <div className="form-grid">
+        <Field label="传代时间"><input type="datetime-local" required value={localTimeInput(draft.at)} onChange={e => e.target.value && setDraft({ ...draft, at: new Date(e.target.value).toISOString() })} /></Field>
+        <Field label="新瓶代次"><input required value={draft.passage} onChange={e => setDraft({ ...draft, passage: e.target.value })} /></Field>
+        <Field label="新培养容器"><Choice label="新培养容器" value={draft.type} options={['T25 Flask', 'T75 Flask', 'T175 Flask', 'Tube', 'Custom']} onChange={type => setDraft({ ...draft, type })} /></Field>
+        <Field label="分成几瓶（1–50）"><Numeric value={draft.targets.length} min={1} max={50} onChange={n => {
+          if (!Number.isInteger(n) || n < 1 || n > 50) return;
+          setDraft({ ...draft, targets: Array.from({ length: n }, (_, i) => draft.targets[i] ?? { name: newName(i), stock: 0.5, medium: 3 }) });
+        }} /></Field>
+      </div>
+      <div className="passage-targets">
+        {draft.targets.map((target, i) => <section className="info-box" key={i}>
+          <h3>新瓶 {i + 1}</h3>
+          <div className="form-grid">
+            <Field label="培养瓶名称"><input required value={target.name} onChange={e => updateTarget(i, { name: e.target.value })} /></Field>
+            <Field label="细胞原液（mL）"><Numeric value={target.stock} min={0.000001} onChange={stock => updateTarget(i, { stock })} /></Field>
+            <Field label="新增培养液（mL）"><Numeric value={target.medium} onChange={medium => updateTarget(i, { medium })} /></Field>
+          </div>
+          <p>总体积 {Number((target.stock + target.medium).toFixed(6))} mL · 起始 Live 浓度估算 {sci(stockStats.live * target.stock / (target.stock + target.medium))} cells/mL · 活细胞约 {sci(stockStats.live * target.stock)} cells</p>
+        </section>)}
+      </div>
+      <p className={total > remaining(count) + 1e-8 ? 'warning' : 'info-box'}>共分出原液 {Number(total.toFixed(6))} mL；原瓶剩余 {Number((remaining(count) - total).toFixed(6))} mL。原液全部分出后，原瓶将标记为历史容器，原计数仍保留。</p>
+      <details><summary>确认或修改分瓶时的原液读数</summary>
+        <p className="muted">默认沿用所选原瓶计数。若重新悬浮改变了原液体积，请先给原瓶新增计数，再从该记录分瓶；这里可修改本次原液浓度，不会改写原计数。</p>
+        <ReadingsEditor readings={draft.stockReadings} onChange={stockReadings => { setConfirmed(false); setDraft({ ...draft, stockReadings }); }} basis={draft.stockBasis} onBasis={stockBasis => { setConfirmed(false); setDraft({ ...draft, stockBasis }); }} />
+      </details>
+      <Field label="操作备注"><textarea value={draft.notes} onChange={e => setDraft({ ...draft, notes: e.target.value })} /></Field>
+      <label className="feature"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />我已确认原液浓度与可用体积；新瓶起始记录为稀释估算，之后会追加实测计数。</label>
     </Form>
   );
 }
@@ -510,4 +584,3 @@ export function AfterForm({
     </Form>
   );
 }
-
